@@ -3,10 +3,18 @@ const gl = canvas.getContext("webgl", { xrCompatible: true, antialias: true });
 
 const state = {
   eyeMode: "left",
-  pattern: "depth",
+  leftProfile: "balanced",
+  rightProfile: "balanced",
+  pattern: "steppedRandom",
   difficulty: "normal",
+  nearDistance: 0.8,
+  farDistance: 5,
+  stepInterval: 3,
+  currentDistance: 0.8,
   duration: 180,
   remaining: 180,
+  motionElapsed: 0,
+  randomSeed: 1701,
   running: false,
   paused: false,
   reps: 0,
@@ -27,10 +35,22 @@ const els = {
   durationOutput: document.getElementById("durationOutput"),
   timeRemaining: document.getElementById("timeRemaining"),
   activeEyeLabel: document.getElementById("activeEyeLabel"),
+  activeProfileLabel: document.getElementById("activeProfileLabel"),
+  activeDistanceLabel: document.getElementById("activeDistanceLabel"),
   repCount: document.getElementById("repCount"),
   phaseLabel: document.getElementById("phaseLabel"),
+  instructionLabel: document.getElementById("instructionLabel"),
+  leftProfileSelect: document.getElementById("leftProfileSelect"),
+  rightProfileSelect: document.getElementById("rightProfileSelect"),
   patternSelect: document.getElementById("patternSelect"),
   difficultySelect: document.getElementById("difficultySelect"),
+  nearDistanceInput: document.getElementById("nearDistanceInput"),
+  farDistanceInput: document.getElementById("farDistanceInput"),
+  nearDistanceOutput: document.getElementById("nearDistanceOutput"),
+  farDistanceOutput: document.getElementById("farDistanceOutput"),
+  distanceRangeOutput: document.getElementById("distanceRangeOutput"),
+  stepIntervalInput: document.getElementById("stepIntervalInput"),
+  stepIntervalOutput: document.getElementById("stepIntervalOutput"),
 };
 
 const vertexSource = `
@@ -66,14 +86,17 @@ const program = createProgram(vertexSource, fragmentSource);
 const lineProgram = createProgram(vertexSource, lineFragmentSource);
 const targetBuffer = gl.createBuffer();
 const guideBuffer = gl.createBuffer();
+const backgroundBuffer = gl.createBuffer();
+let backgroundCacheKey = "";
+let backgroundVertexCount = 0;
 
 gl.bindBuffer(gl.ARRAY_BUFFER, targetBuffer);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, -2]), gl.DYNAMIC_DRAW);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0]), gl.DYNAMIC_DRAW);
 
 const guideVertices = [];
 for (let i = 0; i <= 96; i += 1) {
   const a = (Math.PI * 2 * i) / 96;
-  guideVertices.push(Math.cos(a) * 0.35, Math.sin(a) * 0.35, -2.2);
+  guideVertices.push(Math.cos(a) * 0.2, Math.sin(a) * 0.2, 0);
 }
 gl.bindBuffer(gl.ARRAY_BUFFER, guideBuffer);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(guideVertices), gl.STATIC_DRAW);
@@ -107,11 +130,23 @@ function formatTime(seconds) {
 }
 
 function updateUi() {
+  const timeSeconds = getMotionTime(performance.now() / 1000);
   els.durationOutput.textContent = formatTime(state.duration);
   els.timeRemaining.textContent = formatTime(state.remaining);
   els.repCount.textContent = String(state.reps);
-  els.activeEyeLabel.textContent = getActiveEyeLabel(performance.now() / 1000);
+  els.activeEyeLabel.textContent = getActiveEyeLabel(timeSeconds);
+  els.activeProfileLabel.textContent = getProfileLabel(getRenderProfile(timeSeconds));
+  els.activeDistanceLabel.textContent = formatMeters(state.currentDistance);
   els.phaseLabel.textContent = state.running && !state.paused ? "운동 중" : state.paused ? "일시정지" : "대기";
+  els.instructionLabel.textContent = getInstructionText(getRenderProfile(timeSeconds));
+  els.nearDistanceOutput.textContent = formatMeters(state.nearDistance);
+  els.farDistanceOutput.textContent = formatMeters(state.farDistance);
+  els.distanceRangeOutput.textContent = `${formatMeters(state.nearDistance)} - ${formatMeters(state.farDistance)}`;
+  els.stepIntervalOutput.textContent = `${state.stepInterval.toFixed(1)}초`;
+}
+
+function getMotionTime(timeSeconds) {
+  return state.running || state.paused ? state.motionElapsed : timeSeconds * 0.35;
 }
 
 function getSpeed() {
@@ -131,23 +166,128 @@ function getActiveEyeLabel(timeSeconds) {
   return mode === "left" ? "왼쪽" : "오른쪽";
 }
 
+function formatMeters(value) {
+  return `${value.toFixed(1)}m`;
+}
+
+function getProfileForEye(eye) {
+  if (eye === "left") return state.leftProfile;
+  if (eye === "right") return state.rightProfile;
+  if (state.leftProfile === state.rightProfile) return state.leftProfile;
+  return "balanced";
+}
+
+function getRenderProfile(timeSeconds) {
+  const activeEye = getActiveEye(timeSeconds);
+  return getProfileForEye(activeEye);
+}
+
+function getProfileLabel(profile) {
+  if (profile === "myopia") return "근시/원거리";
+  if (profile === "hyperopia") return "원시/근거리";
+  return "균형";
+}
+
+function getInstructionText(profile) {
+  if (state.pattern === "steppedRandom") {
+    return `${state.stepInterval.toFixed(1)}초마다 거리 단계를 바꾸고 위치는 무작위로 배치합니다`;
+  }
+  if (profile === "myopia") return "원거리 체류를 길게 두고 편안한 이완감을 확인하세요";
+  if (profile === "hyperopia") return "근거리 체류를 길게 두되 흐림이나 통증이 생기면 중단하세요";
+  return "머리를 편하게 두고 타겟을 부드럽게 따라가세요";
+}
+
+function getDepthProgress(baseProgress, profile) {
+  if (profile === "myopia") return Math.pow(baseProgress, 0.55);
+  if (profile === "hyperopia") return Math.pow(baseProgress, 1.85);
+  return baseProgress;
+}
+
+function getTrackingDepth(profile) {
+  const range = state.farDistance - state.nearDistance;
+  if (profile === "myopia") return state.nearDistance + range * 0.78;
+  if (profile === "hyperopia") return state.nearDistance + range * 0.22;
+  return state.nearDistance + range * 0.5;
+}
+
+function seededRandom(seed) {
+  const value = Math.sin((seed + state.randomSeed) * 12.9898) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function smoothstep(value) {
+  const clamped = Math.max(0, Math.min(1, value));
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+function lerp(a, b, amount) {
+  return a + (b - a) * amount;
+}
+
+function getSteppedRandomPosition(stepIndex, profile) {
+  const sequence = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25];
+  const sequenceIndex = ((stepIndex % sequence.length) + sequence.length) % sequence.length;
+  const depthProgress = getDepthProgress(sequence[sequenceIndex], profile);
+  const depth = state.nearDistance + depthProgress * (state.farDistance - state.nearDistance);
+  const maxX = Math.min(1.55, Math.max(0.12, depth * 0.22));
+  const maxY = Math.min(0.9, Math.max(0.08, depth * 0.14));
+  const x = (seededRandom(stepIndex * 2 + 11) - 0.5) * maxX * 2;
+  const y = (seededRandom(stepIndex * 2 + 12) - 0.5) * maxY * 2;
+  return [x, y, -depth];
+}
+
+function getSteppedTargetPosition(timeSeconds, profile) {
+  const interval = Math.max(1, state.stepInterval);
+  const stepIndex = Math.floor(timeSeconds / interval);
+  const localProgress = (timeSeconds % interval) / interval;
+  if (stepIndex !== state.repPhase) {
+    state.repPhase = stepIndex;
+    if (state.running && !state.paused) state.reps += 1;
+  }
+
+  const current = getSteppedRandomPosition(stepIndex, profile);
+  const previous = getSteppedRandomPosition(stepIndex - 1, profile);
+  const transitionPortion = Math.min(0.42, 0.8 / interval);
+  if (localProgress > transitionPortion) return current;
+
+  const amount = smoothstep(localProgress / transitionPortion);
+  return [
+    lerp(previous[0], current[0], amount),
+    lerp(previous[1], current[1], amount),
+    lerp(previous[2], current[2], amount),
+  ];
+}
+
 function getTargetPosition(timeSeconds) {
   const speed = getSpeed();
   const t = timeSeconds * speed;
   const wave = Math.sin(t * Math.PI * 2);
+  const baseProgress = (wave + 1) / 2;
+  const profile = getRenderProfile(timeSeconds);
+  if (state.pattern === "steppedRandom") return getSteppedTargetPosition(timeSeconds, profile);
+
   const cycle = Math.floor(t);
   if (cycle !== state.repPhase) {
     state.repPhase = cycle;
     if (state.running && !state.paused) state.reps += 1;
   }
 
-  if (state.pattern === "horizontal") return [wave * 0.75, 0, -2.2];
-  if (state.pattern === "vertical") return [0, wave * 0.45, -2.2];
+  const trackingDepth = getTrackingDepth(profile);
+  const horizontalRange = Math.min(1.8, Math.max(0.6, trackingDepth * 0.34));
+  const verticalRange = Math.min(1.15, Math.max(0.35, trackingDepth * 0.22));
+
+  if (state.pattern === "horizontal") return [wave * horizontalRange, 0, -trackingDepth];
+  if (state.pattern === "vertical") return [0, wave * verticalRange, -trackingDepth];
   if (state.pattern === "circle") {
-    return [Math.cos(t * Math.PI * 2) * 0.55, Math.sin(t * Math.PI * 2) * 0.35, -2.2];
+    return [
+      Math.cos(t * Math.PI * 2) * horizontalRange * 0.78,
+      Math.sin(t * Math.PI * 2) * verticalRange * 0.78,
+      -trackingDepth,
+    ];
   }
 
-  const depth = 1.05 + ((wave + 1) / 2) * 2.45;
+  const depthProgress = getDepthProgress(baseProgress, profile);
+  const depth = state.nearDistance + depthProgress * (state.farDistance - state.nearDistance);
   return [0, 0, -depth];
 }
 
@@ -155,6 +295,8 @@ function startSession() {
   state.running = true;
   state.paused = false;
   state.remaining = state.duration;
+  state.motionElapsed = 0;
+  state.randomSeed = Math.floor(Math.random() * 100000);
   state.reps = 0;
   state.repPhase = 0;
   state.lastTimestamp = 0;
@@ -171,6 +313,7 @@ function resetSession() {
   state.running = false;
   state.paused = false;
   state.remaining = state.duration;
+  state.motionElapsed = 0;
   state.reps = 0;
   updateUi();
 }
@@ -220,6 +363,50 @@ function translateMatrix(x, y, z) {
   return out;
 }
 
+function addLine(vertices, a, b) {
+  vertices.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+}
+
+function addDepthFrame(vertices, depth) {
+  const width = Math.min(3.8, Math.max(0.38, depth * 0.5));
+  const height = Math.min(2.2, Math.max(0.24, depth * 0.3));
+  const z = -depth;
+  const left = -width / 2;
+  const right = width / 2;
+  const top = height / 2;
+  const bottom = -height / 2;
+  addLine(vertices, [left, bottom, z], [right, bottom, z]);
+  addLine(vertices, [right, bottom, z], [right, top, z]);
+  addLine(vertices, [right, top, z], [left, top, z]);
+  addLine(vertices, [left, top, z], [left, bottom, z]);
+}
+
+function updateBackgroundBuffer() {
+  const key = `${state.nearDistance.toFixed(1)}:${state.farDistance.toFixed(1)}`;
+  if (key === backgroundCacheKey) return;
+
+  const vertices = [];
+  const floorY = -1.12;
+  const gridFar = Math.max(8, state.farDistance);
+  for (let z = 0.5; z <= gridFar + 0.01; z += 0.5) {
+    addLine(vertices, [-3.2, floorY, -z], [3.2, floorY, -z]);
+  }
+  for (let x = -3; x <= 3.01; x += 0.5) {
+    addLine(vertices, [x, floorY, -0.4], [x, floorY, -gridFar]);
+  }
+
+  const range = state.farDistance - state.nearDistance;
+  for (let i = 0; i <= 4; i += 1) {
+    addDepthFrame(vertices, state.nearDistance + range * (i / 4));
+  }
+  addLine(vertices, [0, -0.85, -state.nearDistance], [0, -0.85, -state.farDistance]);
+
+  backgroundCacheKey = key;
+  backgroundVertexCount = vertices.length / 3;
+  gl.bindBuffer(gl.ARRAY_BUFFER, backgroundBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+}
+
 function renderScene(projectionMatrix, viewMatrix, viewport, eyeName, timeSeconds) {
   gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
   gl.enable(gl.BLEND);
@@ -227,7 +414,8 @@ function renderScene(projectionMatrix, viewMatrix, viewport, eyeName, timeSecond
   gl.clearColor(0.035, 0.039, 0.051, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  const activeEye = getActiveEye(timeSeconds);
+  const motionSeconds = getMotionTime(timeSeconds);
+  const activeEye = getActiveEye(motionSeconds);
   const eyeDim =
     state.eyeMode === "both" ||
     activeEye === eyeName ||
@@ -235,13 +423,29 @@ function renderScene(projectionMatrix, viewMatrix, viewport, eyeName, timeSecond
       ? 1
       : 0.18;
 
-  const guideMvp = multiply(projectionMatrix, viewMatrix);
-  drawGuide(guideMvp, eyeDim);
+  const sceneMvp = multiply(projectionMatrix, viewMatrix);
+  drawBackground(sceneMvp, eyeDim);
 
-  const [x, y, z] = getTargetPosition(timeSeconds);
-  const model = translateMatrix(x, y, z + 2);
-  const mvp = multiply(multiply(projectionMatrix, viewMatrix), model);
+  const [x, y, z] = getTargetPosition(motionSeconds);
+  state.currentDistance = Math.abs(z);
+  const model = translateMatrix(x, y, z);
+  const mvp = multiply(sceneMvp, model);
+  drawGuide(mvp, eyeDim);
   drawTarget(mvp, eyeDim);
+}
+
+function drawBackground(mvp, dim) {
+  updateBackgroundBuffer();
+  gl.useProgram(lineProgram);
+  gl.bindBuffer(gl.ARRAY_BUFFER, backgroundBuffer);
+  const position = gl.getAttribLocation(lineProgram, "position");
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 0, 0);
+  gl.uniformMatrix4fv(gl.getUniformLocation(lineProgram, "modelViewProjection"), false, new Float32Array(mvp));
+  gl.uniform1f(gl.getUniformLocation(lineProgram, "pointScale"), 1);
+  gl.uniform3f(gl.getUniformLocation(lineProgram, "color"), 0.28, 0.38, 0.48);
+  gl.uniform1f(gl.getUniformLocation(lineProgram, "dim"), dim * 0.7);
+  gl.drawArrays(gl.LINES, 0, backgroundVertexCount);
 }
 
 function drawGuide(mvp, dim) {
@@ -275,6 +479,7 @@ function tickTimer(timestamp) {
     if (state.lastTimestamp) {
       const delta = (timestamp - state.lastTimestamp) / 1000;
       state.remaining -= delta;
+      state.motionElapsed += delta;
       if (state.remaining <= 0) {
         state.remaining = 0;
         state.running = false;
@@ -351,10 +556,47 @@ document.querySelectorAll("[data-eye-mode]").forEach((button) => {
 
 els.patternSelect.addEventListener("change", () => {
   state.pattern = els.patternSelect.value;
+  state.repPhase = -1;
+  state.reps = 0;
+  updateUi();
 });
 
 els.difficultySelect.addEventListener("change", () => {
   state.difficulty = els.difficultySelect.value;
+});
+
+els.leftProfileSelect.addEventListener("change", () => {
+  state.leftProfile = els.leftProfileSelect.value;
+  updateUi();
+});
+
+els.rightProfileSelect.addEventListener("change", () => {
+  state.rightProfile = els.rightProfileSelect.value;
+  updateUi();
+});
+
+els.nearDistanceInput.addEventListener("input", () => {
+  state.nearDistance = Number(els.nearDistanceInput.value);
+  if (state.nearDistance > state.farDistance - 0.4) {
+    state.farDistance = Math.min(8, state.nearDistance + 0.4);
+    els.farDistanceInput.value = String(state.farDistance);
+  }
+  updateUi();
+});
+
+els.farDistanceInput.addEventListener("input", () => {
+  state.farDistance = Number(els.farDistanceInput.value);
+  if (state.farDistance < state.nearDistance + 0.4) {
+    state.nearDistance = Math.max(0.4, state.farDistance - 0.4);
+    els.nearDistanceInput.value = String(state.nearDistance);
+  }
+  updateUi();
+});
+
+els.stepIntervalInput.addEventListener("input", () => {
+  state.stepInterval = Number(els.stepIntervalInput.value);
+  state.repPhase = -1;
+  updateUi();
 });
 
 els.durationInput.addEventListener("input", () => {

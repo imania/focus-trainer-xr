@@ -85,7 +85,8 @@ h1 {
 
 .field-group,
 .field-grid,
-.slider-row {
+.slider-row,
+.range-card {
   display: grid;
   gap: 10px;
 }
@@ -157,9 +158,42 @@ button:disabled {
   grid-template-columns: 1fr;
 }
 
+.range-card {
+  padding: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.range-header,
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(130px, auto);
+  align-items: center;
+  gap: 10px;
+}
+
+.range-header label,
+.slider-row span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.slider-row input[type="range"] {
+  grid-column: 1 / -1;
+}
+
+.range-header output {
+  color: var(--accent);
+  font-weight: 800;
+  text-align: right;
+}
+
 .slider-row output {
   color: var(--text);
   font-weight: 800;
+  text-align: right;
 }
 
 .button-row {
@@ -170,7 +204,7 @@ button:disabled {
 
 .session-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
 
@@ -189,7 +223,9 @@ button:disabled {
 }
 
 .session-stats strong {
-  font-size: 20px;
+  font-size: 18px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .scene-panel {
@@ -239,6 +275,10 @@ button:disabled {
 
   .field-grid,
   .button-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .session-stats {
     grid-template-columns: 1fr 1fr;
   }
 }
