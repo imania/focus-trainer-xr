@@ -2,9 +2,18 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 
 class Handler(SimpleHTTPRequestHandler):
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".webmanifest": "application/manifest+json",
+        ".js": "text/javascript",
+        ".css": "text/css",
+        ".png": "image/png",
+    }
+
     def end_headers(self):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Service-Worker-Allowed", "./")
         super().end_headers()
 
 

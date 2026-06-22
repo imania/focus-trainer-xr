@@ -1,0 +1,32 @@
+{
+  "id": "./?app=focus-trainer-xr",
+  "name": "Focus Trainer XR",
+  "short_name": "Focus XR",
+  "description": "An immersive wellness trainer for visual focus shifts, step-based depth changes, and eye comfort routines.",
+  "start_url": "./?pwa=immersive&autoEnter=1",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#090a0d",
+  "theme_color": "#46c2a5",
+  "icons": [
+    {
+      "src": "./assets/icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icons/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}

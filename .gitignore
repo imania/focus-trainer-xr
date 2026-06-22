@@ -1,0 +1,10 @@
+.video_av/
+.video_tools/
+video_samples_test/
+.local-tools/
+cloudflare-tunnel-url.txt
+cloudflare-tunnel.log
+cloudflare-tunnel.err.log
+cloudflare-token.txt
+__pycache__/
+*.pyc

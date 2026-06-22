@@ -1,5 +1,6 @@
 const canvas = document.getElementById("xrCanvas");
 const gl = canvas.getContext("webgl", { xrCompatible: true, antialias: true });
+const launchParams = new URLSearchParams(window.location.search);
 
 const state = {
   eyeMode: "left",
@@ -506,19 +507,26 @@ function drawPreview(timestamp) {
 async function setupXr() {
   if (!("xr" in navigator)) {
     els.xrStatus.textContent = "WebXR 미지원";
-    return;
+    return false;
   }
 
   const supported = await navigator.xr.isSessionSupported("immersive-vr");
   els.xrStatus.textContent = supported ? "Quest VR 가능" : "VR 미지원";
   els.xrButton.disabled = !supported;
+  return supported;
 }
 
 async function enterXr() {
   if (!navigator.xr || state.xrSession) return;
-  const session = await navigator.xr.requestSession("immersive-vr", {
-    optionalFeatures: ["local-floor", "bounded-floor"],
-  });
+  let session;
+  try {
+    session = await navigator.xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor", "bounded-floor"],
+    });
+  } catch (error) {
+    els.xrStatus.textContent = "VR 진입 실패";
+    throw error;
+  }
   state.xrSession = session;
   state.xrBaseLayer = new XRWebGLLayer(session, gl);
   session.updateRenderState({ baseLayer: state.xrBaseLayer });
@@ -528,6 +536,40 @@ async function enterXr() {
     requestAnimationFrame(drawPreview);
   });
   session.requestAnimationFrame(onXrFrame);
+}
+
+function shouldAutoEnterImmersive() {
+  return (
+    launchParams.get("autoEnter") === "1" ||
+    launchParams.get("pwa") === "immersive" ||
+    window.getDigitalGoodsService !== undefined
+  );
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    await navigator.serviceWorker.register("./service-worker.js");
+  } catch (error) {
+    console.warn("Service worker registration failed", error);
+  }
+}
+
+async function initializeApp() {
+  registerServiceWorker();
+  updateUi();
+  requestAnimationFrame(drawPreview);
+
+  const supported = await setupXr();
+  if (supported && shouldAutoEnterImmersive()) {
+    els.xrStatus.textContent = "PWA VR 진입 중";
+    try {
+      await enterXr();
+      if (!state.running) startSession();
+    } catch (error) {
+      console.warn("PWA immersive launch failed", error);
+    }
+  }
 }
 
 function onXrFrame(timestamp, frame) {
@@ -612,6 +654,4 @@ els.xrButton.addEventListener("click", enterXr);
 
 window.addEventListener("resize", resizeCanvas);
 
-setupXr();
-updateUi();
-requestAnimationFrame(drawPreview);
+initializeApp();
