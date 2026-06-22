@@ -63,16 +63,32 @@ void main() {
   gl_PointSize = pointScale;
 }`;
 
-const fragmentSource = `
+const sphereVertexSource = `
+attribute vec3 position;
+attribute vec3 normal;
+uniform mat4 modelViewProjection;
+varying vec3 vNormal;
+varying vec3 vPosition;
+void main() {
+  vNormal = normalize(normal);
+  vPosition = position;
+  gl_Position = modelViewProjection * vec4(position, 1.0);
+}`;
+
+const sphereFragmentSource = `
 precision mediump float;
 uniform vec3 color;
 uniform float dim;
+varying vec3 vNormal;
+varying vec3 vPosition;
 void main() {
-  vec2 coord = gl_PointCoord - vec2(0.5);
-  float dist = length(coord);
-  if (dist > 0.5) discard;
-  float glow = smoothstep(0.5, 0.0, dist);
-  gl_FragColor = vec4(color * dim, glow);
+  vec3 lightDir = normalize(vec3(-0.35, 0.65, 0.7));
+  float diffuse = max(dot(normalize(vNormal), lightDir), 0.0);
+  float rim = pow(1.0 - max(vNormal.z, 0.0), 2.0);
+  float highlight = pow(max(dot(normalize(vNormal), normalize(vec3(-0.45, 0.55, 0.7))), 0.0), 18.0);
+  vec3 shaded = color * (0.42 + diffuse * 0.58) + vec3(0.6, 1.0, 0.88) * highlight * 0.45;
+  shaded += vec3(0.18, 0.55, 0.47) * rim * 0.28;
+  gl_FragColor = vec4(shaded * dim, dim);
 }`;
 
 const lineFragmentSource = `
@@ -83,24 +99,24 @@ void main() {
   gl_FragColor = vec4(color * dim, 0.42);
 }`;
 
-const program = createProgram(vertexSource, fragmentSource);
+const sphereProgram = createProgram(sphereVertexSource, sphereFragmentSource);
 const lineProgram = createProgram(vertexSource, lineFragmentSource);
-const targetBuffer = gl.createBuffer();
 const guideBuffer = gl.createBuffer();
 const backgroundBuffer = gl.createBuffer();
+const spherePositionBuffer = gl.createBuffer();
+const sphereNormalBuffer = gl.createBuffer();
 let backgroundCacheKey = "";
 let backgroundVertexCount = 0;
-
-gl.bindBuffer(gl.ARRAY_BUFFER, targetBuffer);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 0]), gl.DYNAMIC_DRAW);
+let sphereVertexCount = 0;
 
 const guideVertices = [];
 for (let i = 0; i <= 96; i += 1) {
   const a = (Math.PI * 2 * i) / 96;
-  guideVertices.push(Math.cos(a) * 0.2, Math.sin(a) * 0.2, 0);
+  guideVertices.push(Math.cos(a) * 1.65, Math.sin(a) * 1.65, 0);
 }
 gl.bindBuffer(gl.ARRAY_BUFFER, guideBuffer);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(guideVertices), gl.STATIC_DRAW);
+buildSphereMesh();
 
 function createShader(type, source) {
   const shader = gl.createShader(type);
@@ -364,6 +380,66 @@ function translateMatrix(x, y, z) {
   return out;
 }
 
+function scaleMatrix(x, y, z) {
+  const out = identity();
+  out[0] = x;
+  out[5] = y;
+  out[10] = z;
+  return out;
+}
+
+function modelMatrix(x, y, z, scale) {
+  return multiply(translateMatrix(x, y, z), scaleMatrix(scale, scale, scale));
+}
+
+function getTargetRadius(distance) {
+  const depthFactor = Math.max(0, Math.min(1, (distance - state.nearDistance) / Math.max(0.1, state.farDistance - state.nearDistance)));
+  return 0.065 + depthFactor * 0.035;
+}
+
+function buildSphereMesh() {
+  const latSegments = 14;
+  const lonSegments = 24;
+  const positions = [];
+  const normals = [];
+
+  for (let lat = 0; lat < latSegments; lat += 1) {
+    const theta1 = (lat / latSegments) * Math.PI;
+    const theta2 = ((lat + 1) / latSegments) * Math.PI;
+    for (let lon = 0; lon < lonSegments; lon += 1) {
+      const phi1 = (lon / lonSegments) * Math.PI * 2;
+      const phi2 = ((lon + 1) / lonSegments) * Math.PI * 2;
+      const p1 = spherePoint(theta1, phi1);
+      const p2 = spherePoint(theta2, phi1);
+      const p3 = spherePoint(theta2, phi2);
+      const p4 = spherePoint(theta1, phi2);
+      pushSphereTriangle(positions, normals, p1, p2, p3);
+      pushSphereTriangle(positions, normals, p1, p3, p4);
+    }
+  }
+
+  sphereVertexCount = positions.length / 3;
+  gl.bindBuffer(gl.ARRAY_BUFFER, spherePositionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, sphereNormalBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+}
+
+function spherePoint(theta, phi) {
+  return [
+    Math.sin(theta) * Math.cos(phi),
+    Math.cos(theta),
+    Math.sin(theta) * Math.sin(phi),
+  ];
+}
+
+function pushSphereTriangle(positions, normals, ...points) {
+  points.forEach((point) => {
+    positions.push(point[0], point[1], point[2]);
+    normals.push(point[0], point[1], point[2]);
+  });
+}
+
 function addLine(vertices, a, b) {
   vertices.push(a[0], a[1], a[2], b[0], b[1], b[2]);
 }
@@ -411,6 +487,8 @@ function updateBackgroundBuffer() {
 function renderScene(projectionMatrix, viewMatrix, viewport, eyeName, timeSeconds) {
   gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
   gl.enable(gl.BLEND);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.clearColor(0.035, 0.039, 0.051, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -429,7 +507,8 @@ function renderScene(projectionMatrix, viewMatrix, viewport, eyeName, timeSecond
 
   const [x, y, z] = getTargetPosition(motionSeconds);
   state.currentDistance = Math.abs(z);
-  const model = translateMatrix(x, y, z);
+  const targetRadius = getTargetRadius(state.currentDistance);
+  const model = modelMatrix(x, y, z, targetRadius);
   const mvp = multiply(sceneMvp, model);
   drawGuide(mvp, eyeDim);
   drawTarget(mvp, eyeDim);
@@ -463,16 +542,21 @@ function drawGuide(mvp, dim) {
 }
 
 function drawTarget(mvp, dim) {
-  gl.useProgram(program);
-  gl.bindBuffer(gl.ARRAY_BUFFER, targetBuffer);
-  const position = gl.getAttribLocation(program, "position");
+  gl.useProgram(sphereProgram);
+  const position = gl.getAttribLocation(sphereProgram, "position");
   gl.enableVertexAttribArray(position);
+  gl.bindBuffer(gl.ARRAY_BUFFER, spherePositionBuffer);
   gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 0, 0);
-  gl.uniformMatrix4fv(gl.getUniformLocation(program, "modelViewProjection"), false, new Float32Array(mvp));
-  gl.uniform1f(gl.getUniformLocation(program, "pointScale"), 54);
-  gl.uniform3f(gl.getUniformLocation(program, "color"), 0.27, 0.86, 0.72);
-  gl.uniform1f(gl.getUniformLocation(program, "dim"), dim);
-  gl.drawArrays(gl.POINTS, 0, 1);
+
+  const normal = gl.getAttribLocation(sphereProgram, "normal");
+  gl.enableVertexAttribArray(normal);
+  gl.bindBuffer(gl.ARRAY_BUFFER, sphereNormalBuffer);
+  gl.vertexAttribPointer(normal, 3, gl.FLOAT, false, 0, 0);
+
+  gl.uniformMatrix4fv(gl.getUniformLocation(sphereProgram, "modelViewProjection"), false, new Float32Array(mvp));
+  gl.uniform3f(gl.getUniformLocation(sphereProgram, "color"), 0.27, 0.86, 0.72);
+  gl.uniform1f(gl.getUniformLocation(sphereProgram, "dim"), dim);
+  gl.drawArrays(gl.TRIANGLES, 0, sphereVertexCount);
 }
 
 function tickTimer(timestamp) {

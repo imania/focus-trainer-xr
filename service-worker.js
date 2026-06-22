@@ -1,4 +1,4 @@
-const CACHE_NAME = "focus-trainer-xr-v1";
+const CACHE_NAME = "focus-trainer-xr-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
