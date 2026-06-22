@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Focus Trainer XR</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="control-panel" aria-label="Exercise controls">
+      <div class="brand-row">
+        <div>
+          <p class="eyebrow">Meta Quest 2 WebXR MVP</p>
+          <h1>Focus Trainer XR</h1>
+        </div>
+        <div class="status-pill" id="xrStatus">XR 확인 중</div>
+      </div>
+
+      <div class="notice">
+        의료 진단 또는 치료 앱이 아닌 눈 초점 전환과 휴식 루틴을 돕는 웰니스 도구입니다.
+        통증, 복시, 어지러움이 있으면 즉시 중단하세요.
+      </div>
+
+      <div class="field-group">
+        <label>운동할 눈</label>
+        <div class="segmented" role="radiogroup" aria-label="Eye mode">
+          <button class="mode-button active" data-eye-mode="left" type="button">왼쪽</button>
+          <button class="mode-button" data-eye-mode="right" type="button">오른쪽</button>
+          <button class="mode-button" data-eye-mode="both" type="button">양쪽</button>
+          <button class="mode-button" data-eye-mode="alternate" type="button">교대</button>
+        </div>
+      </div>
+
+      <div class="field-grid">
+        <label>
+          운동 패턴
+          <select id="patternSelect">
+            <option value="depth">가까이-멀리 초점 전환</option>
+            <option value="horizontal">좌우 추적</option>
+            <option value="vertical">상하 추적</option>
+            <option value="circle">원형 추적</option>
+          </select>
+        </label>
+        <label>
+          난이도
+          <select id="difficultySelect">
+            <option value="easy">쉬움</option>
+            <option value="normal" selected>보통</option>
+            <option value="calm">천천히</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="slider-row">
+        <label for="durationInput">세션 시간</label>
+        <input id="durationInput" type="range" min="60" max="600" step="30" value="180">
+        <output id="durationOutput">3:00</output>
+      </div>
+
+      <div class="button-row">
+        <button id="startButton" class="primary" type="button">시작</button>
+        <button id="pauseButton" type="button">일시정지</button>
+        <button id="resetButton" type="button">리셋</button>
+        <button id="xrButton" class="primary ghost" type="button" disabled>Enter VR</button>
+      </div>
+
+      <div class="session-stats" aria-live="polite">
+        <div>
+          <span>남은 시간</span>
+          <strong id="timeRemaining">3:00</strong>
+        </div>
+        <div>
+          <span>현재 눈</span>
+          <strong id="activeEyeLabel">왼쪽</strong>
+        </div>
+        <div>
+          <span>반복</span>
+          <strong id="repCount">0</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene-panel" aria-label="3D preview">
+      <canvas id="xrCanvas"></canvas>
+      <div class="scene-overlay">
+        <span id="phaseLabel">대기</span>
+        <span>머리를 편하게 두고 타겟을 부드럽게 따라가세요</span>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
